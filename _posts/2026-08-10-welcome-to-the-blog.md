@@ -5,7 +5,7 @@ categories: [Blog, Technology]
 tags: [reverse-engineering, software-engineering]
 ---
 
-Welcome to **inflearner**, my technical blog.
+Hi, I'm **inflearner**. Welcome to my technical blog.
 
 This is where I share what I learn and build, with a focus on reverse engineering and software engineering.
 
