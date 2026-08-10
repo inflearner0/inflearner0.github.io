@@ -1,25 +1,19 @@
 ---
 title: "Welcome to the Blog"
 date: 2026-08-10 12:00:00 +0200
-categories: [Blog, Updates]
-tags: [welcome, jekyll]
+categories: [Blog, Technology]
+tags: [reverse-engineering, software-engineering]
 ---
 
-Hello, world!
+Welcome to **inflearner**, my technical blog.
 
-This is an example post for a site built with Jekyll and the Chirpy theme. It demonstrates the basic structure of a blog post, including front matter, headings, lists, and code.
+This is where I share what I learn and build, with a focus on reverse engineering and software engineering.
 
-## What you can publish
+You can expect posts about topics such as:
 
-- Project updates
-- Tutorials and notes
-- Ideas worth sharing
+- Analyzing how software works under the hood
+- Reverse-engineering tools, techniques, and discoveries
+- Software architecture and development practices
+- Technical experiments, tutorials, and project notes
 
-## A small code example
-
-```javascript
-const greeting = 'Hello from Jekyll!';
-console.log(greeting);
-```
-
-Edit this file or add another Markdown file to the `_posts` directory whenever you are ready to publish something new.
+I created this blog to document the process, deepen my understanding, and share useful knowledge with other curious developers. Thanks for reading.
