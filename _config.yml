@@ -162,6 +162,8 @@ paginate: 10
 # The base URL of your site
 baseurl: ""
 
+# Pages rebuild marker after the 2026-08-10 rollback.
+
 # ------------ The following options are not recommended to be modified ------------------
 
 kramdown:
