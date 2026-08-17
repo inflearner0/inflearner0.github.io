@@ -35,9 +35,10 @@ The whole fix turns out to be one word: `lock`.
 9. [The fix](#the-fix)
 10. [Reachability](#reachability)
 11. [Proving it on a live kernel](#proving-it-on-a-live-kernel)
-12. [What this is worth](#what-this-is-worth)
-13. [Artifacts](#artifacts)
-14. [What was worth learning](#what-was-worth-learning)
+12. [Trying to win the race, and failing](#trying-to-win-the-race-and-failing)
+13. [What this is worth](#what-this-is-worth)
+14. [Artifacts](#artifacts)
+15. [What was worth learning](#what-was-worth-learning)
 
 ## Reading the advisory
 
@@ -411,6 +412,117 @@ one the guest was using — see the
 [NTFS writeup](/posts/ntfs-ea-oob-read-patch-diff/#building-the-lab). Same lab,
 same gotchas.
 
+## Trying to win the race, and failing
+
+Everything above is static analysis plus a disassembly listing. That proves the
+bug is real; it does not prove the race is winnable. So I tried to win it.
+
+I did not. Here is exactly how far I got, because a documented failure is more
+useful than a vague claim.
+
+**The syscalls are reachable.** All 21 `NtFlipObject*` entry points are exported
+by `win32u.dll`, so no syscall-stub work is needed — a plain `DllImport` reaches
+them:
+
+```
+NtFlipObjectCreate -> 0x00000000   handle=0x2D0
+```
+
+An ordinary user-mode process can create a flip object. Good start.
+
+**The instrumentation works.** Three breakpoints over KDNET — the two `Release`
+methods plus `DxgkCompositionObject::Create` as a control, since that is what
+`NtFlipObjectCreate` calls internally:
+
+```
+Breakpoint 2 hit
+dxgkrnl!DxgkCompositionObject::Create:
+fffff807`269b416c 4c8bdc          mov     r11,rsp
+```
+
+The control fired. Breakpoints are live and the syscall path executes.
+
+**The race attempt.** Eight threads hammering `AddContent` / `SetContent` /
+`RemoveContent` against one shared flip object for thirty seconds:
+
+```
+spinning 8 threads for 30s ...
+iterations: 22542232
+survived (no bugcheck)
+
+CFlipResource::Release        -> NEVER FIRED
+CFlipPropertySetBase::Release -> NEVER FIRED
+```
+
+22.5 million iterations. Zero hits on either `Release`. The refcount code never
+executed once, so **no race was ever contested**. The absence of a crash here
+means nothing at all — I never got to the starting line.
+
+**Why.** Per-call status codes exposed the problem immediately:
+
+```
+Create        0x00000000
+AddContent    0xC0000005    STATUS_ACCESS_VIOLATION
+SetContent    0xC0000005    STATUS_ACCESS_VIOLATION
+RemoveContent 0xC0000005    STATUS_ACCESS_VIOLATION
+```
+
+`ACCESS_VIOLATION` means the kernel was probing my arguments as **user-mode
+pointers**. My signatures were guesses, and they were wrong. The real one:
+
+```c
+NtFlipObjectAddContent(void *handle,
+                       unsigned __int64 *contentId,   // pointer, probed
+                       unsigned int count,
+                       void *items)                   // FlipPropertyItem[]
+{
+  ...
+  v8 = *a2;
+  FlipPropertySet = CreateFlipPropertySetWorker<CFlipPropertySet>(a3, a4);
+  if ( FlipPropertySet >= 0 )
+    FlipPropertySet = FlipManagerObject::ResolveHandle(a1, 2u, v10, &v12);
+  if ( FlipPropertySet >= 0 )
+    FlipPropertySet = FlipManagerObject::AddContent(v12, v8, 0);
+}
+```
+
+Note `CreateFlipPropertySetWorker<CFlipPropertySet>` — that allocates precisely
+the object whose refcount is vulnerable. The path is right; I just cannot get
+through the door.
+
+Retrying with correct pointer semantics:
+
+```
+AddContent cnt=0 buf=64   -> 0xC0000022   STATUS_ACCESS_DENIED
+AddContent cnt=1 buf=256  -> 0xC000000D   STATUS_INVALID_PARAMETER
+AddContent cnt=4 buf=1024 -> 0xC000000D   STATUS_INVALID_PARAMETER
+```
+
+The `ACCESS_VIOLATION` is gone, so the pointer handling is now correct. Two
+blockers remain:
+
+- **`count = 0` → ACCESS_DENIED**, failing inside
+  `FlipManagerObject::ResolveHandle`. The handle from `NtFlipObjectCreate` does
+  not carry the rights this call wants — the object almost certainly has to be
+  opened in a specific producer/consumer endpoint role first. `NtFlipObjectOpen`
+  also rejects my guessed signature.
+- **`count >= 1` → INVALID_PARAMETER.** The `FlipPropertyItem` layout is wrong.
+  It is recoverable from
+  `CFlipPropertySet(unsigned int, FlipPropertyItem *, void *, unsigned int)`,
+  but I did not reverse it.
+
+**And an environmental doubt worth stating.** Neither `Release` breakpoint fired
+during ordinary system operation either, with `dwm.exe` running. This guest's
+display adapter is *Microsoft Hyper-V Video* — a synthetic device with no
+WDDM flip-model support — and there is no interactive session. The flip path may
+simply be cold on this hardware no matter how correct my calls become. A GPU-PV
+enabled VM or physical hardware would settle that.
+
+So: the attempt was real, instrumented, and unsuccessful. Winning this race
+needs the endpoint role model and the property-item layout reversed properly,
+and probably hardware that actually uses the flip present path. That is a
+different project, and `AC:H` is starting to look like an understatement.
+
 ## What this is worth
 
 Being precise, because this is where writeups usually overclaim:
@@ -426,11 +538,14 @@ Being precise, because this is where writeups usually overclaim:
   you need two threads to land inside it on the same object while the count is
   at exactly 1.
 
-**What I did not do: win the race.** This post proves the vulnerable instruction
-sequence exists in a live kernel, that it is genuinely non-atomic, that the
-patched build replaces it with a locked instruction, and that the increment path
-was unprotected too. It does not include a working exploit, and I am not going to
-pretend that instruction-level root-cause evidence is the same thing as one.
+**What I did not do: win the race.** I tried — the whole attempt is documented
+[above](#trying-to-win-the-race-and-failing) — and 22.5 million iterations later
+the vulnerable function had not executed a single time. This post proves the
+vulnerable instruction sequence exists in a live kernel, that it is genuinely
+non-atomic, that the patched build replaces it with a locked instruction, and
+that the increment path was unprotected too. It does not include a working
+exploit, and I am not going to pretend that instruction-level root-cause
+evidence is the same thing as one.
 
 The gap between "this is a real race" and "I can win this race reliably enough to
 groom the pool and hijack a vtable" is most of the work in a real LPE chain, and
@@ -443,6 +558,8 @@ it is exactly the part `AC:H` is describing.
 | [`RACE_evidence.txt`](/assets/posts/dxgkrnl-flip-refcount-uaf/RACE_evidence.txt) | The live-kernel disassembly, the patched sequence, both losing interleavings, and an explicit statement of what is and is not proven. |
 | [`bytediff.py`](/assets/posts/dxgkrnl-flip-refcount-uaf/bytediff.py) | The raw byte-diff tool from the failed detour — grouped runs attributed to PE sections. Useful when a patch really is surgical. |
 | [`diffdb.py`](/assets/posts/dxgkrnl-flip-refcount-uaf/diffdb.py) | Function-inventory diff: added, removed and changed functions by name with size and instruction-count deltas. |
+| [`RACE_ATTEMPT.txt`](/assets/posts/dxgkrnl-flip-refcount-uaf/RACE_ATTEMPT.txt) | Full log of the failed race attempt — every status code, the corrected signature, and the two remaining blockers. |
+| [`fliprace.cs`](/assets/posts/dxgkrnl-flip-refcount-uaf/fliprace.cs) | The multi-threaded harness. It reaches `NtFlipObjectCreate` successfully and gets no further; published as a starting point, not a working exploit. |
 
 ## What was worth learning
 

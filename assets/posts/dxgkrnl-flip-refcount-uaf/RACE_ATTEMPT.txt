@@ -1,0 +1,131 @@
+CVE-2026-61346 — attempt to actually win the race
+Lab: Hyper-V guest, Windows 11 22H2 build 22621.6060, KDNET attached,
+     adapter "Microsoft Hyper-V Video", no interactive session.
+
+RESULT: FAILED. The race was never contested. The harness never reached the
+        vulnerable reference-counting code. Details below.
+
+---------------------------------------------------------------------------
+STEP 1 — is the syscall surface reachable from user mode?
+---------------------------------------------------------------------------
+All 21 NtFlipObject* entry points are exported by win32u.dll (and referenced by
+dcomp.dll), so no undocumented syscall stub work is needed:
+
+  win32u.dll : 21 NtFlipObject* strings
+  dcomp.dll  : 21 NtFlipObject* strings
+  gdi32.dll  : 0
+  dxgi.dll   : 0
+
+Calling NtFlipObjectCreate directly:
+
+  NtFlipObjectCreate -> 0x00000000   handle=0x2D0        SUCCESS
+
+So the object can be created by an ordinary user-mode process.
+
+---------------------------------------------------------------------------
+STEP 2 — is the instrumentation working?
+---------------------------------------------------------------------------
+Breakpoints set over KDNET:
+
+  bp dxgkrnl!CFlipResource::Release
+  bp dxgkrnl!CFlipPropertySetBase::Release
+  bp dxgkrnl!DxgkCompositionObject::Create      <- control
+
+Running the harness:
+
+  Breakpoint 2 hit
+  dxgkrnl!DxgkCompositionObject::Create:
+  fffff807`269b416c 4c8bdc          mov     r11,rsp
+
+The control breakpoint fired, proving the syscall path executes and the
+breakpoints are live. DxgkCompositionObject::Create is what NtFlipObjectCreate
+calls internally.
+
+---------------------------------------------------------------------------
+STEP 3 — the race attempt
+---------------------------------------------------------------------------
+8 threads spinning AddContent / SetContent / RemoveContent against one shared
+flip object for 30 seconds:
+
+  spinning 8 threads for 30s ...
+  iterations: 22542232
+  survived (no bugcheck)
+
+  CFlipResource::Release        -> NEVER FIRED
+  CFlipPropertySetBase::Release -> NEVER FIRED
+
+22.5 million iterations, zero hits on either Release. The refcount code was
+never executed even once, so no race was ever contested.
+
+---------------------------------------------------------------------------
+STEP 4 — why it never got there
+---------------------------------------------------------------------------
+Per-call status codes with the first (guessed) signatures:
+
+  Create        0x00000000
+  AddContent    0xC0000005    STATUS_ACCESS_VIOLATION
+  SetContent    0xC0000005    STATUS_ACCESS_VIOLATION
+  RemoveContent 0xC0000005    STATUS_ACCESS_VIOLATION
+  AddPoolBuffer 0xC000000D    STATUS_INVALID_PARAMETER
+
+ACCESS_VIOLATION means the kernel was probing the values as user-mode POINTERS.
+The signatures were wrong. Decompiling the real one:
+
+  NtFlipObjectAddContent(void *handle,
+                         unsigned __int64 *contentId,   <- pointer, probed
+                         unsigned int count,
+                         void *items)                   <- FlipPropertyItem[]
+
+  ... v8 = *a2;
+      FlipPropertySet = CreateFlipPropertySetWorker<CFlipPropertySet>(a3, a4);
+      if ( FlipPropertySet >= 0 )
+        FlipPropertySet = FlipManagerObject::ResolveHandle(a1, 2u, v10, &v12);
+      if ( FlipPropertySet >= 0 )
+        FlipPropertySet = FlipManagerObject::AddContent(v12, v8, 0);
+
+Note CreateFlipPropertySetWorker<CFlipPropertySet> — that allocates exactly the
+object whose refcount is the vulnerable one. The path is correct.
+
+Retrying with correct pointer semantics (contentId by reference, real buffer):
+
+  AddContent cnt=0 buf=64   -> 0xC0000022   STATUS_ACCESS_DENIED
+  AddContent cnt=0 buf=256  -> 0xC0000022
+  AddContent cnt=0 buf=1024 -> 0xC0000022
+  AddContent cnt=1 buf=64   -> 0xC000000D   STATUS_INVALID_PARAMETER
+  AddContent cnt=1 buf=256  -> 0xC000000D
+  AddContent cnt=2 buf=1024 -> 0xC000000D
+  AddContent cnt=4 buf=1024 -> 0xC000000D
+
+The ACCESS_VIOLATION is gone, so the pointer semantics are now right. Two
+remaining blockers:
+
+  count = 0  -> ACCESS_DENIED inside FlipManagerObject::ResolveHandle.
+               The handle from NtFlipObjectCreate does not carry the rights this
+               call wants; the object very likely has to be opened in a specific
+               producer/consumer endpoint role first. NtFlipObjectOpen also
+               returns 0xC000000D with a guessed signature.
+
+  count >= 1 -> INVALID_PARAMETER. The FlipPropertyItem layout is wrong. It is
+               recoverable from
+               CFlipPropertySet(unsigned int, FlipPropertyItem *, void *, unsigned int)
+               but was not reversed here.
+
+---------------------------------------------------------------------------
+STEP 5 — a second, environmental doubt
+---------------------------------------------------------------------------
+Neither Release breakpoint fired during ~55 seconds of ordinary system
+operation either, with dwm.exe running. The guest's display adapter is
+"Microsoft Hyper-V Video" — a synthetic device with no WDDM flip-model
+support — and there is no interactive session. The flip/present path may
+simply be cold on this hardware regardless of how correct the calls become.
+A GPU-PV enabled VM or physical hardware would remove that doubt.
+
+---------------------------------------------------------------------------
+CONCLUSION
+---------------------------------------------------------------------------
+Proven:      the vulnerable sequence exists and runs in a live kernel; it is
+             genuinely non-atomic; the patch replaces it with lock xadd; the
+             increment side was unprotected too. (See RACE_evidence.txt)
+
+NOT proven:  that the race can be won. Attempted, instrumented, and it never
+             reached the code. No use-after-free was produced.
