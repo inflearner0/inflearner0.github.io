@@ -4,53 +4,52 @@ icon: fas fa-info-circle
 order: 4
 ---
 
-I'm **inflearner**. I do Windows kernel vulnerability research, and this is where
-I write up what I find.
+I'm **inflearner**, a security researcher. Most of what I publish here is
+Windows kernel vulnerability research, but the thing underneath it is a broader
+interest in how computers actually work — compilers, machine learning systems,
+and systems programming generally.
 
-Most of it starts the same way: a four-line MSRC advisory, a CWE number, and a
-binary that changed by a few hundred bytes. The advisory is never the
-interesting part. The interesting part is the specific instruction that moved,
-and whether the story you build around it survives contact with a live kernel.
+The security writing usually starts the same way: a four-line MSRC advisory, a
+CWE number, and a binary that changed by a few hundred bytes. The advisory is
+never the interesting part. The interesting part is the specific instruction
+that moved, and whether the story you build around it survives contact with a
+live kernel.
 
 ## What you'll find here
 
-### Patch diffing
-
-Pulling pre- and post-patch binaries out of
+**Patch diffing.** Pulling pre- and post-patch binaries out of
 [Winbindex](https://winbindex.m417z.com/), diffing them, and working down to the
-individual change the CVE is about — including the awkward case where one patch
-fixes several bugs and nobody tells you which change belongs to which CVE.
+individual change a CVE is about — including the awkward case where one patch
+fixes several bugs and nobody tells you which change belongs to which CVE. So
+far that has covered an `$EA` out-of-bounds read in NTFS (CVE-2026-50313) and a
+missing `lock` prefix in `dxgkrnl.sys` (CVE-2026-61346).
 
-- [CVE-2026-50313 — an `$EA` out-of-bounds read in NTFS]({% post_url 2026-08-17-ntfs-ea-oob-read-patch-diff %})
-- [CVE-2026-61346 — a missing `lock` prefix in `dxgkrnl.sys`]({% post_url 2026-08-17-dxgkrnl-flip-refcount-uaf %})
+**Exploitation.** Taking a primitive from "this reads out of bounds" to
+something concrete on a target with SMEP, KASLR, DEP and CFG all enabled, and
+being explicit about which steps the target handed me and which ones had to be
+earned.
 
-### Exploitation
+**Systems and tooling.** The infrastructure the above runs on: kernel debugging
+setups that stay attached, hypervisor work, and the various ways a virtual
+machine can lie to you about being alive.
 
-Taking a primitive from "this reads out of bounds" to something concrete on a
-target with SMEP, KASLR, DEP and CFG all enabled — and being explicit about
-which steps the target handed me and which ones had to be earned.
-
-- [The Vulnerable Password Manager]({% post_url 2026-08-17-vulnerable-password-manager %})
-  — four information leaks and a ring 0 ROP chain against a deliberately
-  vulnerable driver.
-
-### Lab and tooling notes
-
-The infrastructure the above runs on: kernel debugging setups that actually
-stay attached, hypervisor work, and the various ways a virtual machine can lie
-to you about being alive. Less of this is written up so far; more is coming.
+**Computer science more broadly.** Compiler theory — IRs, optimisation passes,
+and the gap between what you wrote and what the backend decided you meant — and
+machine learning and AI systems, mostly from the same angle: what the runtime
+is really doing, not what the abstraction promises. Less of this is written up
+so far. More is coming.
 
 ## How I work
 
-A few rules I hold myself to, because they're the difference between a writeup
+Different subjects, same habits, and they're the difference between a writeup
 and a guess:
 
-- **Read the instructions, not the summary.** If a claim can be settled in a
-  disassembler or a kernel debugger, it gets settled there rather than argued
-  from documentation.
+- **Read the artefact, not the summary.** If a claim can be settled in a
+  disassembler, a kernel debugger, or a compiler's own output, it gets settled
+  there rather than argued from documentation.
 - **Prove it on a live system.** Static analysis tells you what *should*
   happen; a breakpoint tells you what *does*. These posts end with output from
-  a real kernel, not a screenshot of pseudocode.
+  a real machine, not a screenshot of pseudocode.
 - **Say when I'm wrong, and say what I forced.** If the bug I found turns out
   not to be the CVE I started from, that goes in the post. If part of a crash
   was set up by hand rather than reached organically, that goes in the post

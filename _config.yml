@@ -159,8 +159,9 @@ pwa:
 
 paginate: 10
 
-# Build posts whose date is in the future (Jekyll skips them by default).
-future: true
+# Hold future-dated posts back until their date arrives. The scheduled build in
+# .github/workflows/pages-deploy.yml re-runs daily so they go live on schedule.
+future: false
 
 # The base URL of your site
 baseurl: ""

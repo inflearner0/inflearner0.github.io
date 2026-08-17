@@ -9,6 +9,11 @@ on:
       - README.md
       - LICENSE
 
+  # Rebuild daily so future-dated posts go live on their date without a push.
+  # 16:00 UTC is after the latest scheduled post time (17:00 +0200 = 15:00 UTC).
+  schedule:
+    - cron: "0 16 * * *"
+
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 

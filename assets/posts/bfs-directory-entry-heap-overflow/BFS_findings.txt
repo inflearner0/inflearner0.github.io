@@ -1,0 +1,204 @@
+CVE-2026-62722 — Microsoft Brokering File System Elevation of Privilege
+Heap-based buffer overflow (CWE-122) in bfs.sys
+
+=====================================================================
+0. WHICH BINARY?
+=====================================================================
+MSRC revised this CVE on 2026-08-17 ("Corrected the CVE description and
+title"). The advisory's article list contains BOTH titles:
+
+  "Windows Bind Filter Driver Elevation of Privilege Vulnerability"   -> bindflt.sys
+  "Windows Brokering File System Elevation of Privilege Vulnerability" -> bfs.sys
+
+Resolved empirically from winbindex SHA-256 hashes across the August update:
+
+  bindflt.sys  26200.8973 -> 26200.9168   3d35d17b40031485 -> 3d35d17b40031485  UNCHANGED
+  bindflt.sys  28000.2608 -> 28000.2704   b9c525516a16d2ff -> b9c525516a16d2ff  UNCHANGED
+  bfs.sys      26200.8973 -> 26200.9168   b144c382c9e6ca40 -> 0f3a7196b1b909f4  CHANGED
+  bfs.sys      28000.2608 -> 28000.2704   38ff950a0fd38a21 -> ebffdd1b7cfa6bc1  CHANGED
+
+bindflt.sys is byte-identical across the update. The target is bfs.sys, and the
+corrected title is the accurate one.
+
+=====================================================================
+1. THE DIFF
+=====================================================================
+bfs.sys is small (~165 KB, 264 functions), so the diff is unusually tight.
+
+  24H2/25H2  26100.8972 -> 26100.9168 : 8 changed, 8 added, 1 removed
+  26H1       28000.2605 -> 28000.2704 : 8 changed, 8 added, 1 removed
+
+Intersection of both branches (all 8, identical set):
+
+  BfsCloseStorage                       213  -> 317   (+104)
+  BfsDereferenceTableEntry              295  -> 366   (+71)
+  BfsInsertDirectoryEntry              1250  -> 1333  (+83)
+  BfsInsertDirectoryEntry_OLD          1237  -> 1318  (+81)
+  BfsInsertPolicyEntry                 2060  -> 2108  (+48)
+  BfsInsertPolicyEntryLocked           1837  -> 1889  (+52)
+  BfsPreloadPolicyEntriesForDeleteList  799  -> 1097  (+298)
+  BfsRenameEntry                       1610  -> 1770  (+160)
+
+  removed: BfsCloseRootDirectory (inlined into BfsCloseStorage)
+
+Every function grew. Added code = added validation.
+
+=====================================================================
+2. THE HEAP OVERFLOW (the CWE-122)
+=====================================================================
+BfsRenameEntry, BEFORE (26100.8972):
+
+  Entry = BfsFindEntry(v10, v61);
+  if ( Entry )
+  {
+    memset((void *)(Entry + 20), 0, 0x200u);              // 512-byte destination field
+    memmove((void *)(v20 + 20), Src[1], LOWORD(Src[0]));  // <-- NO BOUND CHECK
+    Directory = BfsGetEntryBlock(v10, v20, StartingIndex, v58);
+    ...
+  }
+
+`Src` is a UNICODE_STRING:
+    +0x00  Length         USHORT     -> LOWORD(Src[0])
+    +0x02  MaximumLength  USHORT
+    +0x08  Buffer         PWSTR      -> Src[1]
+
+The destination is a FIXED 0x200 (512) byte field inside the heap-allocated
+directory entry — that is exactly what the memset clears. The copy length is
+the caller-supplied name Length, with nothing verifying it fits.
+
+A name longer than 512 bytes overflows the field and corrupts adjacent pool
+memory. USHORT Length allows up to 65535, so the overflow can run ~64 KB past
+the end of the field.
+
+AFTER (26100.9168):
+
+  if ( (unsigned int)Feature_3252922680__private_IsEnabledDeviceUsageNoInline()
+       && LOWORD(Src[0]) > 0x1FEu )
+  {
+    ExReleasePushLockExclusiveEx(v10, 0);
+    KeLeaveCriticalRegion();
+    BfsDereferenceTableEntry((PVOID)(v17 - 8));
+    Directory = -1073741562;                 // 0xC0000106 STATUS_NAME_TOO_LONG
+  }
+  else
+  {
+    memset((void *)(Entry + 20), 0, 0x200u);
+    memmove((void *)(Entry + 20), Src[1], LOWORD(Src[0]));
+    ...
+  }
+
+0x1FE = 510 = 512 - 2, leaving room for the UTF-16 NUL terminator. Correct bound.
+
+=====================================================================
+3. HOW MANY SITES? — the decisive count
+=====================================================================
+Searching every instruction in both builds for a comparison against 1FEh:
+
+  26100.8972_BEFORE : 0 occurrences
+  26100.9168_AFTER  : 4 occurrences
+
+      BfsInsertDirectoryEntry       mov  eax, 1FEh
+      BfsInsertDirectoryEntry_OLD   mov  eax, 1FEh
+      BfsRenameEntry                mov  eax, 1FEh
+      BfsRenameEntry                mov  eax, 1FEh
+
+Zero before, four after, in exactly the three functions whose size grew by
++83 / +81 / +160. The same missing length check on the same 512-byte name
+field, in four places. That accounts for those three size deltas precisely.
+
+=====================================================================
+4. THE OTHER FIVE FUNCTIONS — a separate, bundled theme
+=====================================================================
+The remaining changes are object-lifetime hardening, not length checks:
+
+BfsDereferenceTableEntry — re-check the refcount under the lock before teardown:
+
+  for ( i = _InterlockedExchangeAdd(Buffer + 38, 0xFFFFFFFF); i == 1; ... )
+  {
+    ExAcquirePushLockExclusiveEx(v5, 0);
+  +  if ( Feature_3150426426...() && *((_DWORD *)v1 + 38) )   // someone re-referenced it
+  +  {
+  +    ExReleasePushLockExclusiveEx(...); KeLeaveCriticalRegion(); return;   // do NOT free
+  +  }
+     ... proceed to unlink and free
+
+  Classic resurrection race: the count reaches zero, but another thread finds
+  the entry in the table and re-references it before the lock is taken. Without
+  the re-check the object is freed while still referenced.
+
+BfsCloseStorage — do not keep enumerating from an entry that was just freed:
+
+     if ( RtlIsGenericTableEmptyAvl(...) )
+       BfsDereferenceTableEntry(p_DeleteCount);      // may free the entry
+  -  else
+  -    v4 = (RTL_AVL_TABLE *)(p_DeleteCount + 40);   // old: continue from (possibly freed) entry
+  +  { ... reset enumeration root back to (P + 10) ... }
+
+  Also inlines the removed BfsCloseRootDirectory.
+
+BfsPreloadPolicyEntriesForDeleteList — switches from weak to STRONG hash-table
+  enumeration (RtlInitStrongEnumerationHashTable /
+  RtlStronglyEnumerateEntryHashTable), which pins entries so they cannot be
+  removed mid-walk.
+
+BfsInsertPolicyEntry / BfsInsertPolicyEntryLocked — state-machine tightening
+  around the pending-insert states.
+
+Checked and NOT the bug: the SID allocation/copy pair in
+BfsInsertPolicyEntryLocked looks like a size mismatch at first glance —
+
+    ExAllocatePool2(256, 4LL * a6[1] + 8, ...)
+    RtlCopySid(4 * *((unsigned __int8 *)Sid + 1) + 8, v10, Sid)
+
+  but a6 is declared `unsigned __int8 *`, so a6[1] IS SubAuthorityCount. The
+  sizes agree, and both lines are identical before and after.
+
+=====================================================================
+5. FEATURE FLAGS
+=====================================================================
+Every fix is gated behind a WIL velocity flag, with the original code retained
+in the else branch:
+
+  Feature_3252922680   the 0x1FE length bound          (the CWE-122 fix)
+  Feature_3150426426   refcount re-check under lock
+  Feature_1154987323   enumeration reset in CloseStorage
+  Feature_331850041    strong hash-table enumeration
+
+Third consecutive Microsoft patch in this series where the security fix is
+runtime-gated rather than unconditional.
+
+=====================================================================
+6. LAB STATUS — no PoC attempted, and why
+=====================================================================
+Affected per the CVE: Windows 11 24H2 (<26100.9168), 25H2 (<26200.9168),
+26H1 (<28000.2704), Server 2025 (<26100.33296). Notably NOT 22H2 or 23H2.
+
+The lab guest is Windows 11 22H2 build 22621.6060. Its bfs.sys:
+
+  - does NOT contain BfsRenameEntry at all (the primary vulnerable function)
+  - has BfsInsertDirectoryEntry with a similar unchecked pattern, but a
+    different field size:
+        memset((void *)(v15 + v14 + 12), 0, 0x210u);      // 0x210, not 0x200
+        memmove(v16 + 5, a5[1], *(unsigned __int16 *)a5); // still unchecked
+  - contains 0 occurrences of the 1FEh bound
+
+So the guest is structurally similar but is NOT the affected code, and
+Microsoft did not list that branch. No exploit attempt was made against it,
+because a result either way would say nothing about this CVE.
+
+Reaching BfsRenameEntry on an actually-affected build means driving the
+Brokering File System's rename path (bfs.sys is the broker used for file
+redirection by packaged / AppContainer applications). That requires a
+24H2-or-later target and is not attempted here.
+
+=====================================================================
+CONCLUSION
+=====================================================================
+Proven:     bfs.sys is the affected binary (bindflt.sys is byte-identical
+            across the update); the overflow is an unbounded memmove of a
+            caller-supplied UNICODE_STRING into a fixed 512-byte pool field;
+            the fix is a 0x1FE bound added at 4 sites across 3 functions,
+            zero of which existed before; confirmed in two servicing branches.
+
+Not done:   no PoC. The lab guest does not contain the vulnerable function and
+            is not an affected build.
