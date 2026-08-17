@@ -1,6 +1,6 @@
 ---
 title: "Welcome to the Blog"
-date: 2026-08-10 12:00:00 +0200
+date: 2026-02-10 12:00:00 +0100
 categories: [Blog, Technology]
 tags: [reverse-engineering, software-engineering]
 ---

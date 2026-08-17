@@ -1,6 +1,6 @@
 ---
 title: "CVE-2026-61346 — Windows Graphics Kernel Elevation of Privilege Vulnerability: A Missing `lock` Prefix"
-date: 2026-08-17 17:00:00 +0200
+date: 2026-04-17 17:00:00 +0200
 categories: [Vulnerability Research, Windows Kernel]
 tags: [windows, dxgkrnl, patch-diffing, winbindex, ida, kernel-debugging, kdnet, use-after-free, race-condition, refcount, reverse-engineering]
 ---
