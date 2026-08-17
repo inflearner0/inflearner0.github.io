@@ -1,6 +1,6 @@
 ---
 title: "The Vulnerable Password Manager: Four Leaks, One Format String, and a Ring 0 ROP Chain"
-date: 2026-08-17 12:00:00 +0200
+date: 2026-08-17 05:30:00 +0200
 categories: [Exploitation, Windows Kernel]
 tags: [windows, kernel, exploitation, rop, x86-64, kaslr, stack-cookie, ida, reverse-engineering]
 ---
