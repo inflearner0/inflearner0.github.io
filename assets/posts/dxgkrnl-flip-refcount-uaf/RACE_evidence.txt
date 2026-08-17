@@ -1,0 +1,126 @@
+CVE-2026-61346 — Windows Graphics Kernel (dxgkrnl.sys) Use-After-Free
+Non-atomic reference counting on CFlipResource / CFlipPropertySetBase
+
+=====================================================================
+1. VULNERABLE CODE — live kernel, Windows 11 22H2 build 22621.6060
+   captured over KDNET with `uf dxgkrnl!CFlipResource::Release`
+=====================================================================
+
+dxgkrnl!CFlipResource::Release:
+  fffff807`26a22298 4053            push    rbx
+  fffff807`26a2229a 4883ec20        sub     rsp,20h
+  fffff807`26a2229e 834118ff        add     dword ptr [rcx+18h],0FFFFFFFFh   <-- (A)
+  fffff807`26a222a2 8b5918          mov     ebx,dword ptr [rcx+18h]          <-- (B)
+  fffff807`26a222a5 7511            jne     +0x20
+
+dxgkrnl!CFlipResource::Release+0xf:
+  fffff807`26a222a7 488b11          mov     rdx,qword ptr [rcx]
+  fffff807`26a222aa 488b02          mov     rax,qword ptr [rdx]
+  fffff807`26a222ad ba01000000      mov     edx,1
+  fffff807`26a222b2 e8e98f4000      call    fffff807`26e2b2a0                <-- destructor
+  fffff807`26a222b7 90              nop
+
+(A) is a read-modify-write on the refcount at this+0x18 with NO `lock` prefix.
+    On a multiprocessor system this is not atomic: two cores can both read the
+    same value, both decrement it, and both write the same result.
+
+(B) is a SECOND, independent read of the same field. Even if (A) were atomic,
+    the value used for the return and the value used for the zero-test come
+    from two different points in time. Three instructions, two race windows.
+
+Losing the race two ways:
+
+  refcount = 2, threads T1 and T2 both call Release()
+      T1 reads 2 ... T2 reads 2 ... T1 writes 1 ... T2 writes 1
+      -> one decrement is lost, refcount never reaches 0, object leaks
+
+  refcount = 1, threads T1 and T2 both call Release()
+      T1 reads 1, ZF=1 ... T2 reads 1, ZF=1 ... both take the branch
+      -> destructor invoked TWICE -> double free / use-after-free  (CWE-416)
+
+The second case is the vulnerability. It matches the advisory exactly:
+CWE-416 Use After Free, AC:H, and Microsoft's own FAQ note that
+"successful exploitation of this vulnerability requires an attacker to win a
+race condition."
+
+=====================================================================
+2. PATCHED CODE — build 26100.9168 (11 Aug 2026)
+=====================================================================
+
+  call    Feature_562023738__private_IsEnabledDeviceUsageNoInline
+  test    eax, eax
+  jz      short <legacy path>
+  or      ebx, 0FFFFFFFFh
+  lock xadd [rdi+18h], ebx          <-- ATOMIC decrement, returns old value
+  dec     ebx                       <-- new value derived, not re-read
+  jmp     short <common tail>
+<legacy path>
+  mov     ebx, [rdi+18h]            <-- original non-atomic sequence, retained
+  dec     ebx
+  mov     [rdi+18h], ebx
+<common tail>
+  test    ebx, ebx
+  jnz     short <return>
+  test    rdi, rdi                  <-- added NULL check
+  jz      short <return>
+  ... call destructor via _guard_dispatch_icall
+
+`lock xadd` closes both windows at once: the decrement is atomic AND the value
+used for the zero-test is the one the atomic operation returned, not a re-read.
+Exactly one thread can observe the transition to zero.
+
+NOTE: the fix is gated behind feature flag Feature_562023738. The `else` branch
+still contains the original non-atomic sequence.
+
+=====================================================================
+3. THE MATCHING INCREMENT SIDE
+=====================================================================
+
+Before the patch neither class had an AddRef method at all; increments were
+inlined at each call site, also non-atomically:
+
+  CContentResourceState::SetBoundPropertySet   (BEFORE)
+      if ( a2 )
+        ++*((_DWORD *)a2 + 2);            // non-atomic inline increment
+
+  CContentResourceState::SetBoundPropertySet   (AFTER)
+      if ( a2 )
+        CFlipPropertySetBase::AddRef(a2); // -> lock xadd
+
+New in the patched build:
+  ?AddRef@CFlipResource@@QEAAKXZ
+  ?AddRef@CFlipPropertySetBase@@QEAAKXZ
+
+both of which use _InterlockedIncrement under the same feature flag.
+
+=====================================================================
+4. REACHABILITY
+=====================================================================
+
+The affected objects are the flip/present resources reached from 21 user-mode
+syscalls exported by dxgkrnl, among them:
+
+  NtFlipObjectCreate            NtFlipObjectSetContent
+  NtFlipObjectAddContent        NtFlipObjectRemoveContent
+  NtFlipObjectAddPoolBuffer     NtFlipObjectRemovePoolBuffer
+  NtFlipObjectConsumerAcquirePresent
+  NtFlipObjectQueryNextMessageToProducer
+
+SetContent / AddContent / RemoveContent drive
+CContentResourceState::SetBoundPropertySet and ::SetBoundBuffer, which are the
+call sites that were converted from inline increments to AddRef. Two threads
+racing those paths on the same flip object is the primitive.
+
+=====================================================================
+5. SCOPE OF THIS EVIDENCE
+=====================================================================
+
+What is proven here: the vulnerable instruction sequence exists in a live
+kernel, it is genuinely non-atomic, the patched build replaces it with a
+locked instruction, and the increment side was unprotected too.
+
+What is NOT done here: no attempt was made to actually win the race and
+produce a UAF on a live system. That would require driving two threads through
+NtFlipObject* on a shared object with the right timing, and the CVSS AC:H
+rating reflects that this is hard. This is instruction-level root-cause
+evidence, not a working exploit.
