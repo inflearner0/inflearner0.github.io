@@ -159,6 +159,9 @@ pwa:
 
 paginate: 10
 
+# Build posts whose date is in the future (Jekyll skips them by default).
+future: true
+
 # The base URL of your site
 baseurl: ""
 
