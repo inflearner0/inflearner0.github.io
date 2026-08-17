@@ -1,6 +1,6 @@
 ---
-title: "Sixty-Four Kilobytes of Kernel: Patch-Diffing an NTFS $EA Out-of-Bounds Read"
-date: 2026-08-17 15:30:00 +0200
+title: "CVE-2026-50313 — Windows NTFS Remote Code Execution Vulnerability: Patch-Diffing an $EA Out-of-Bounds Read"
+date: 2026-08-17 14:00:00 +0200
 categories: [Vulnerability Research, Windows Kernel]
 tags: [windows, ntfs, patch-diffing, winbindex, ida, kernel-debugging, kdnet, oob-read, info-leak, reverse-engineering]
 ---
