@@ -63,8 +63,7 @@ hash equality across the patch is a definitive answer, and it costs one download
 ## The diff
 
 `bfs.sys` is small — about 165 KB and 264 functions, against the 5 MB and 8,400
-functions of `dxgkrnl.sys` in
-[the previous post](/posts/dxgkrnl-flip-refcount-uaf/). Analysis takes seconds
+functions of `dxgkrnl.sys` in the Graphics Kernel writeup. Analysis takes seconds
 rather than minutes.
 
 Both serviced branches, intersected:
@@ -315,9 +314,8 @@ redirection by packaged applications. That is a different afternoon.
 ## What this is worth
 
 - **Type: heap-based buffer overflow (CWE-122)**, and here the CWE and the code
-  actually agree — unlike the NTFS case in
-  [the first post](/posts/ntfs-ea-oob-read-patch-diff/), where a CWE-122 label
-  sat on top of an out-of-bounds *read*.
+  actually agree — unlike the NTFS `$EA` case, where a CWE-122 label sat on top
+  of an out-of-bounds *read*.
 - **A write primitive.** Attacker-controlled data, attacker-controlled length,
   into a pool allocation. That is the ingredient the NTFS read bug lacked, and
   it is why this rates a genuine path to SYSTEM rather than an information leak.
