@@ -37,7 +37,7 @@ The whole fix turns out to be one word: `lock`.
 11. [Proving it on a live kernel](#proving-it-on-a-live-kernel)
 12. [Trying to win the race, and failing](#trying-to-win-the-race-and-failing)
 13. [What this is worth](#what-this-is-worth)
-14. [Artifacts](#artifacts)
+14. [Artifact](#artifact)
 15. [What was worth learning](#what-was-worth-learning)
 16. [Credits](#credits)
 
@@ -557,14 +557,18 @@ The gap between "this is a real race" and "I can win this race reliably enough t
 groom the pool and hijack a vtable" is most of the work in a real LPE chain, and
 it is exactly the part `AC:H` is describing.
 
-## Artifacts
+## Artifact
+
+One proof of concept, and it is honest about what it is: a race-window harness,
+not a working exploit.
 
 | File | What it is |
 |---|---|
-| [`RACE_evidence.txt`](/assets/posts/dxgkrnl-flip-refcount-uaf/RACE_evidence.txt) | The live-kernel disassembly, the patched sequence, both losing interleavings, and an explicit statement of what is and is not proven. |
-| [`bytediff.py`](/assets/posts/dxgkrnl-flip-refcount-uaf/bytediff.py) | The raw byte-diff tool from the failed detour — grouped runs attributed to PE sections. Useful when a patch really is surgical. |
-| [`RACE_ATTEMPT.txt`](/assets/posts/dxgkrnl-flip-refcount-uaf/RACE_ATTEMPT.txt) | Full log of the failed race attempt — every status code, the corrected signature, and the two remaining blockers. |
-| [`fliprace.cs`](/assets/posts/dxgkrnl-flip-refcount-uaf/fliprace.cs) | The multi-threaded harness. It reaches `NtFlipObjectCreate` successfully and gets no further; published as a starting point, not a working exploit. |
+| [`fliprace.cs`](/assets/posts/dxgkrnl-flip-refcount-uaf/fliprace.cs) | Reaches `NtFlipObjectCreate` from an unprivileged process and spins N threads through the content-binding calls that drive the vulnerable refcount, trying to land two threads inside the three-instruction window. Its header carries the KDNET-verified `Release` disassembly, both losing interleavings, and the reachability wall: with breakpoints on both `Release` methods, a create/close loop scores zero hits, because those objects are only born on the `AddContent` path that still needs the `FlipPropertyItem` layout reversed. Published as scaffolding up to that wall, not a working exploit. Compiles in-guest with the inbox `csc.exe`. |
+
+```bash
+fliprace.exe 8 30 race.log
+```
 
 ## What was worth learning
 

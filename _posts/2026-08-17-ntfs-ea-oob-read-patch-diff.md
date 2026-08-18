@@ -41,7 +41,7 @@ explicitly at the end which part of the crash I forced by hand.
 13. [The 64 KB ceiling](#the-64-kb-ceiling)
 14. [Making it crash](#making-it-crash)
 15. [What this is worth](#what-this-is-worth)
-16. [Artifacts](#artifacts)
+16. [Artifact](#artifact)
 17. [What was worth learning](#what-was-worth-learning)
 18. [Credits](#credits)
 
@@ -717,25 +717,25 @@ a write path.
 I could have shipped this post claiming a specific CVE number. The code does not
 support it, so I have not.
 
-## Artifacts
+## Artifact
 
-Everything used in this post, as it actually ran. These are the harnesses and
-captured output, not a weaponised volume builder — there is deliberately no tool
-here that authors a malicious NTFS image from scratch.
+One self-contained proof of concept. It is a harness, not a weaponised volume
+builder — it crafts a *scratch* volume and corrupts its own EA entry; there is
+no tool here that authors an arbitrary malicious NTFS image.
 
 | File | What it is |
 |---|---|
-| [`eatool.cs`](/assets/posts/ntfs-ea-oob-read/eatool.cs) | The main harness. `set` writes one EA named `MAGICEA_`; `query` calls `NtQueryEaFile` into a buffer and hex-dumps the result. Compiles in-guest with the inbox `csc.exe` — no toolchain needed. |
-| [`patcher.cs`](/assets/posts/ntfs-ea-oob-read/patcher.cs) | Locates the MFT `FILE` record for a given filename inside a raw NTFS image, walks its attributes to `$EA_INFORMATION` (type `0xD0`), and rewrites `UnpackedEaSize`. |
-| [`ea.cs`](/assets/posts/ntfs-ea-oob-read/ea.cs) | The earlier single-shot version used for the first debugger-assisted proof. |
-| [`out_selfcontained_read.txt`](/assets/posts/ntfs-ea-oob-read/out_selfcontained_read.txt) | Captured leak from the crafted volume, no debugger involved — 1041 bytes, containing a live MFT record with `IndexerVolumeGuid` and an object-id GUID. |
-| [`out_injected.txt`](/assets/posts/ntfs-ea-oob-read/out_injected.txt) | The first proof, with `EaValueLength` injected at the breakpoint. |
-| [`CRASH_bugcheck.txt`](/assets/posts/ntfs-ea-oob-read/CRASH_bugcheck.txt) | The `0x50` bugcheck with its four arguments decoded, plus a note on exactly which part was forced. |
+| [`ntfs_ea_oob_poc.cs`](/assets/posts/ntfs-ea-oob-read/ntfs_ea_oob_poc.cs) | The whole chain in one file: create a scratch NTFS VHD with `diskpart`, write one ordinary `MAGICEA_` EA, detach, rewrite the on-disk `EaValueLength` (`0x10` → `--leak`), reattach, and `NtQueryEaFile` it back — hex-dumping the kernel paged-pool bytes that come back past the real value. No debugger in the trigger path. Compiles in-guest with the inbox `csc.exe`. |
 
-Reproducing the leak is the `diskpart` sequence from
-[the crafted-volume section](#second-proof-no-debugger-at-all), then `eatool set`,
-detach, patch `EaValueLength` to `0x0400`, reattach, `eatool query`. The whole
-loop is about five minutes in a VM.
+Run it elevated (diskpart needs it):
+
+```bash
+ntfs_ea_oob_poc.exe --leak 0x400 --out leak.txt
+```
+
+`--leak 0x400` returned 1041 bytes — a live MFT `FILE0` record with a filename
+and timestamps — and `--leak 0xFFFF` returned 65552, the 64 KB ceiling. The
+whole loop is a few seconds in a VM you can revert.
 
 ## What was worth learning
 
