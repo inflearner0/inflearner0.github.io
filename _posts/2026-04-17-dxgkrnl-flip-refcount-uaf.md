@@ -39,6 +39,7 @@ The whole fix turns out to be one word: `lock`.
 13. [What this is worth](#what-this-is-worth)
 14. [Artifacts](#artifacts)
 15. [What was worth learning](#what-was-worth-learning)
+16. [Credits](#credits)
 
 ## Reading the advisory
 
@@ -141,6 +142,11 @@ So: load all four binaries into IDA with their PDBs applied, let auto-analysis
 finish, and export the function list from each — name, size, instruction count.
 With symbols the names are stable across builds, so functions can be matched by
 name and compared.
+
+The export itself is one query per database with
+[`idasql`](https://github.com/allthingsida/idasql), which puts a SQL interface
+in front of an IDA database — `SELECT name, size FROM funcs` beats writing and
+re-running an IDAPython exporter across four databases.
 
 `dxgkrnl.sys` has around 8,400 functions. The result was astonishingly clean:
 
@@ -582,3 +588,12 @@ the absence of a four-letter prefix that the decompiler does not show you.
 **A missing `lock` is a security bug.** It reads as a performance detail. On a
 refcount that governs object lifetime, on a multiprocessor system, reachable from
 unprivileged syscalls, it is a use-after-free with a path to SYSTEM.
+
+## Credits
+
+The function inventories that carried this diff came out of
+[`idasql`](https://github.com/allthingsida/idasql) by
+[allthingsida](https://github.com/allthingsida) — it exposes an IDA database as
+queryable SQL tables, so "which functions changed size between these two builds"
+is a couple of queries instead of a pile of one-off scripts. Thanks for
+publishing it.

@@ -43,6 +43,7 @@ explicitly at the end which part of the crash I forced by hand.
 15. [What this is worth](#what-this-is-worth)
 16. [Artifacts](#artifacts)
 17. [What was worth learning](#what-was-worth-learning)
+18. [Credits](#credits)
 
 ## Starting point
 
@@ -200,6 +201,12 @@ such lists by name is trivial once symbols are present, because the names are
 stable across builds; you are looking for functions whose size or instruction
 count moved. A function that gained 40 instructions between June and July is
 where the interesting reading is.
+
+The exports came out of [`idasql`](https://github.com/allthingsida/idasql),
+which lets you query an IDA database in SQL — the whole inventory is
+`SELECT name, size FROM funcs`, run once per database, which is a great deal
+less tedious than maintaining an IDAPython exporter for a job you do every
+Patch Tuesday.
 
 ## Four clusters, four CVEs
 
@@ -758,3 +765,11 @@ less than one that separates them.
 The patch has been available since 14 July 2026. If you are still deciding
 whether to install it, the answer is on the other side of a 64 KB window into
 your kernel.
+
+## Credits
+
+The function inventories this diff was built on came out of
+[`idasql`](https://github.com/allthingsida/idasql) by
+[allthingsida](https://github.com/allthingsida) — it exposes an IDA database as
+queryable SQL tables, which is what made intersecting four builds' function
+lists a few queries rather than a scripting project. Thanks for publishing it.
