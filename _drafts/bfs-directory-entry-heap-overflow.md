@@ -335,7 +335,6 @@ two.
 | File | What it is |
 |---|---|
 | [`BFS_findings.txt`](/assets/posts/bfs-directory-entry-heap-overflow/BFS_findings.txt) | Full analysis: the hash comparison that resolved the driver ambiguity, the complete diff, the before/after overflow code, the fix-site count, the SID false lead, and an explicit statement of what was not done. |
-| [`diffdb.py`](/assets/posts/bfs-directory-entry-heap-overflow/diffdb.py) | Function-inventory diff — added, removed and changed functions with size and instruction-count deltas. |
 
 ## What was worth learning
 

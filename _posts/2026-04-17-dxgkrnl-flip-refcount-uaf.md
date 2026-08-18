@@ -557,7 +557,6 @@ it is exactly the part `AC:H` is describing.
 |---|---|
 | [`RACE_evidence.txt`](/assets/posts/dxgkrnl-flip-refcount-uaf/RACE_evidence.txt) | The live-kernel disassembly, the patched sequence, both losing interleavings, and an explicit statement of what is and is not proven. |
 | [`bytediff.py`](/assets/posts/dxgkrnl-flip-refcount-uaf/bytediff.py) | The raw byte-diff tool from the failed detour — grouped runs attributed to PE sections. Useful when a patch really is surgical. |
-| [`diffdb.py`](/assets/posts/dxgkrnl-flip-refcount-uaf/diffdb.py) | Function-inventory diff: added, removed and changed functions by name with size and instruction-count deltas. |
 | [`RACE_ATTEMPT.txt`](/assets/posts/dxgkrnl-flip-refcount-uaf/RACE_ATTEMPT.txt) | Full log of the failed race attempt — every status code, the corrected signature, and the two remaining blockers. |
 | [`fliprace.cs`](/assets/posts/dxgkrnl-flip-refcount-uaf/fliprace.cs) | The multi-threaded harness. It reaches `NtFlipObjectCreate` successfully and gets no further; published as a starting point, not a working exploit. |
 
